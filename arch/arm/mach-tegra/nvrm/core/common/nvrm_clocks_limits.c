@@ -41,13 +41,49 @@
 #include "ap15/ap15rm_private.h"
 #include "ap15/project_relocation_table.h"
 
+#include <linux/module.h>
 
 #define NvRmPrivGetStepMV(hRmDevice, step) \
          (s_ChipFlavor.pSocShmoo->ShmooVoltages[(step)])
 
-// Extended clock limits IDs
-typedef enum
-{
+#define USE_FAKE_SHMOO
+
+#ifdef USE_FAKE_SHMOO
+#include <linux/kernel.h>
+
+NvRmCpuShmoo fake_CpuShmoo; // Pointer to fake CpuShmoo values
+NvU32 FakeShmooVmaxIndex = 6; // Max voltage index in the voltage tab (size-1)
+#define MAX_OVERCLOCK (1100000)
+NvU32 FakeShmooVoltages[] = {
+	770,
+	800,
+	875,
+	950,
+	1000,
+	1100,
+};
+
+NvRmScaledClkLimits FakepScaledCpuLimits = {
+	101, // FakepScaledCpuLimits.HwDeviceId
+	0, // FakepScaledCpuLimits.SubClockId
+	32, // FakepScaledCpuLimits.MinKHz
+	// Clock table
+	{
+		300000,
+		500000,
+		750000,
+		900000,
+		1000000,
+		1100000,
+	}
+};
+
+#endif // USE_FAKE_SHMOO
+
+
+ // Extended clock limits IDs
+ typedef enum
+ {
     // Last Module ID
     NvRmClkLimitsExtID_LastModuleID = NvRmPrivModuleID_Num,
 
@@ -226,9 +262,13 @@ NvRmPrivClockLimitsInit(NvRmDeviceHandle hRmDevice)
 
     // Set upper clock boundaries for devices on CPU bus (CPU, Mselect,
     // CMC) with combined Absolute/Scaled limits
+#ifdef USE_FAKE_SHMOO
+    CpuMaxKHz = MAX_OVERCLOCK;
+#else
     CpuMaxKHz = pSKUedLimits->CpuMaxKHz;
     CpuMaxKHz = NV_MIN(
         CpuMaxKHz, s_ClockRangeLimits[NvRmModuleID_Cpu].MaxKHz);
+#endif
     s_ClockRangeLimits[NvRmModuleID_Cpu].MaxKHz = CpuMaxKHz;
     if ((hRmDevice->ChipId.Id == 0x15) || (hRmDevice->ChipId.Id == 0x16))
     {
@@ -380,12 +420,21 @@ NvRmPrivModuleVscaleGetMV(
     // Use CPU specific voltage ladder if SoC has dedicated CPU rail
     if (s_ChipFlavor.pCpuShmoo && (Module == NvRmModuleID_Cpu))
     {
+#ifdef USE_FAKE_SHMOO
+        for (i = 0; i < fake_CpuShmoo.ShmooVmaxIndex; i++)
+        {
+		if (FreqKHz <= pScale[i])
+                break;
+        }
+        return fake_CpuShmoo.ShmooVoltages[i];
+#else
         for (i = 0; i < s_ChipFlavor.pCpuShmoo->ShmooVmaxIndex; i++)
         {
             if (FreqKHz <= pScale[i])
                 break;
         }
         return s_ChipFlavor.pCpuShmoo->ShmooVoltages[i];
+#endif
     }
     // Use common ladder for all other modules or CPU on core rail
     for (i = 0; i < s_ChipFlavor.pSocShmoo->ShmooVmaxIndex; i++)
@@ -408,6 +457,12 @@ NvRmPrivModuleVscaleGetMaxKHzList(
     // Use CPU specific voltage ladder if SoC has dedicated CPU rail
     if (s_ChipFlavor.pCpuShmoo && (Module == NvRmModuleID_Cpu))
         *pListSize = s_ChipFlavor.pCpuShmoo->ShmooVmaxIndex + 1;
+#ifdef USE_FAKE_SHMOO
+if
+	(*pListSize = fake_CpuShmoo.ShmooVmaxIndex + 1);
+#else
+        *pListSize = s_ChipFlavor.pCpuShmoo->ShmooVmaxIndex + 1;
+#endif
     else
         *pListSize = s_ChipFlavor.pSocShmoo->ShmooVmaxIndex + 1;
 
@@ -758,6 +813,8 @@ static NvError NvRmBootArgChipShmooGet(
     NvRmMemHandle hMem = NULL;
     NvError err = NvSuccess;
     ExecPlatform env;
+    int i = 0;
+    int j = 0;
 
     // Retrieve shmoo data
     err = NvOsBootArgGet(NvBootArgKey_ChipShmoo, &BootArgSh, sizeof(BootArgSh));
@@ -890,6 +947,14 @@ static NvError NvRmBootArgChipShmooGet(
         // Shmoo data for dedicated CPU domain
         pChipFlavor->pCpuShmoo = &s_CpuShmoo;
 
+#ifdef USE_FAKE_SHMOO
+	s_CpuShmoo.ShmooVoltages = &FakeShmooVoltages[0];
+	s_CpuShmoo.ShmooVmaxIndex = FakeShmooVmaxIndex;
+	s_CpuShmoo.pScaledCpuLimits = &FakepScaledCpuLimits;
+	fake_CpuShmoo.ShmooVoltages = &FakeShmooVoltages[0];
+	fake_CpuShmoo.ShmooVmaxIndex = FakeShmooVmaxIndex;
+	fake_CpuShmoo.pScaledCpuLimits = &FakepScaledCpuLimits;
+#else
         offset = BootArgSh.CpuShmooVoltagesListOffset;
         size = BootArgSh.CpuShmooVoltagesListSize;
         NV_ASSERT (offset + size <= TotalSize);
@@ -899,16 +964,37 @@ static NvError NvRmBootArgChipShmooGet(
               BootArgSh.CpuShmooVoltagesListSize) && (size > 1));
         s_CpuShmoo.ShmooVmaxIndex = size - 1;
 
+	for (i = 0; i < size; i++) {
+		printk(KERN_ERR "ShmooVoltage[%d] %u\n", i, s_CpuShmoo.ShmooVoltages[i]);
+	}
+
         offset = BootArgSh.CpuScaledLimitsOffset;
         size = BootArgSh.CpuScaledLimitsSize;
         NV_ASSERT (offset + size <= TotalSize);
         s_CpuShmoo.pScaledCpuLimits =
             (const NvRmScaledClkLimits*)((NvUPtr)s_pShmooData + offset);
         NV_ASSERT(size == sizeof(*s_CpuShmoo.pScaledCpuLimits));
-    }
-    else
-    {
-        pChipFlavor->pCpuShmoo = NULL;
+/*
+typedef struct NvRmScaledClkLimitsRec
+{
+	NvU32 HwDeviceId;
+	NvU32 SubClockId;
+	NvRmFreqKHz MinKHz;
+	NvRmFreqKHz MaxKHzList[NVRM_VOLTAGE_STEPS];
+} NvRmScaledClkLimits;
+*/
+	for (i = 0; i < size; i++) {
+		printk(KERN_ERR "ScaledCpuLimits[%d] did: %u scid: %u\n minkhz: %u\n", i, s_CpuShmoo.pScaledCpuLimits[i].HwDeviceId, s_CpuShmoo.pScaledCpuLimits[i].SubClockId, s_CpuShmoo.pScaledCpuLimits[i].MinKHz);
+		for (j = 0; j < NVRM_VOLTAGE_STEPS; j++) {
+			printk(KERN_ERR "    MaxKHzList[%d]: %u\n", j, s_CpuShmoo.pScaledCpuLimits[i].MaxKHzList[j]);
+		}
+	}
+#endif
+
+     }
+     else
+     {
+           pChipFlavor->pCpuShmoo = NULL;
     }
     return err;
 
