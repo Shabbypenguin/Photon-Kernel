@@ -7,6 +7,6 @@ export ARCH=arm
 export CROSS_COMPILE=arm-linux-gnueabi-
 make clean
 make oldconfig
-KBUILD_BUILD_VERSION="Photon-Penguins_v0.0.2"
+KBUILD_BUILD_VERSION="Photon-Penguins_v0.0.3-oc"
 export KBUILD_BUILD_VERSION
 make zImage
