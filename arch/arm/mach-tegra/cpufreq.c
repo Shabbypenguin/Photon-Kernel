@@ -63,13 +63,15 @@ extern atomic_t hotplug_policy;
 /* Frequency table index must be sequential starting at 0 and
    frequencies must be ascending*/
 static struct cpufreq_frequency_table freq_table_1100[] = {
-        { 0, 300000 },
-        { 1, 500000 },
-        { 2, 750000 },
-        { 3, 900000 },
-        { 4, 1000000 },
-        { 5, 1100000 },
-        { 6, CPUFREQ_TABLE_END },
+        { 0, 200000 },
+        { 1, 300000 },
+        { 2, 500000 },
+        { 3, 700000 },
+        { 4, 800000 },
+        { 5, 900000 },
+        { 6, 1000000 },
+        { 7, 1100000 },
+        { 8, CPUFREQ_TABLE_END },
 
 };
 
