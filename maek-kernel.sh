@@ -1,10 +1,6 @@
 #!/bin/bash
-rm config
-cp -a ~/config.gz .
-gunzip config.gz
-cp -a config .config
-export ARCH=arm
-export CROSS_COMPILE=arm-linux-gnueabi-
+rm .config
+cp -a savedconfig .config
 make clean
 make oldconfig
 KBUILD_BUILD_VERSION="Photon-Penguins_v0.0.5-OC"
